@@ -2,16 +2,29 @@
   "manifest_version": 3,
   "name": "PSC Pro v1 Test",
   "version": "1.0.0",
-  "description": "Position Size Calculator for TradingView",
-  "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["https://*.tradingview.com/*"],
+  "description": "Position size calculator for TradingView and Exness WebTerminal",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.tradingview.com/*",
+    "https://*.exness.com/*"
+  ],
   "action": {
     "default_popup": "popup/popup.html"
   },
   "content_scripts": [
     {
-      "matches": ["https://*.tradingview.com/*"],
-      "js": ["utils/calculations.js", "content/content.js"]
+      "matches": [
+        "https://*.tradingview.com/*",
+        "https://*.exness.com/*"
+      ],
+      "js": [
+        "utils/calculations.js",
+        "content/content.js"
+      ]
     }
   ]
 }

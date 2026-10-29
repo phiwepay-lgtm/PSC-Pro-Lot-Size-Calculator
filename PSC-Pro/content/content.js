@@ -7,6 +7,22 @@ if (!document.getElementById("psc-styles")) {
   const style = document.createElement('style');
   style.id = "psc-styles";
   style.textContent = `
+    #psc-toggle {
+      position: fixed;
+      top: 80px;
+      right: 20px;
+      z-index: 1000000;
+      border: 1px solid #363A45;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: #131722;
+      color: #fff;
+      font: bold 12px -apple-system, BlinkMacSystemFont, sans-serif;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    #psc-toggle:hover, #psc-toggle:focus-visible { background: #2962FF; }
+    #psc-widget[hidden] { display: none !important; }
     #psc-widget {
       position: fixed;
       top: 80px;
@@ -108,14 +124,28 @@ if (!document.getElementById("psc-styles")) {
 function createWidget() {
   if (document.getElementById("psc-widget")) return;
 
+  const toggle = document.createElement("button");
+  toggle.id = "psc-toggle";
+  toggle.type = "button";
+  toggle.textContent = "⚡ PSC Pro";
+  toggle.setAttribute("aria-controls", "psc-widget");
+  toggle.setAttribute("aria-expanded", "false");
+  document.body.appendChild(toggle);
+
   const widget = document.createElement("div");
   widget.id = "psc-widget";
+  widget.hidden = true;
   widget.innerHTML = `
     <div class="psc-header" id="psc-header-drag">
       <span class="psc-title">⚡ PSC PRO v1</span>
       <span class="psc-badge" id="psc-sym">PAIR</span>
+      <button type="button" id="psc-close" aria-label="Close calculator" style="background:none;border:0;color:#D1D4DC;font-size:18px;cursor:pointer">×</button>
     </div>
     <div class="psc-body">
+      <div class="psc-row">
+        <label class="psc-label" for="psc-symbol-input">Symbol (edit if needed)</label>
+        <input type="text" id="psc-symbol-input" class="psc-input" placeholder="e.g. EURUSD or XAUUSD">
+      </div>
       <div class="psc-row">
         <label class="psc-label">Account Balance ($)</label>
         <input type="number" id="psc-balance" class="psc-input" value="10000">
@@ -147,10 +177,31 @@ function createWidget() {
         <div style="font-size:10px; color:#787B86; margin-top:2px;" id="psc-pips-info">0 Pips Risk</div>
       </div>
 
-      <div class="psc-sync-status" id="psc-status">🟢 Auto-Sync Active (Open Tool Box to Read)</div>
+      <div class="psc-sync-status" id="psc-status"></div>
+      <div style="font-size:10px;color:#aaa;margin-top:8px">Estimates only. Verify contract size, currency conversion and lot limits with your broker.</div>
     </div>
   `;
   document.body.appendChild(widget);
+
+  const setOpen = (open) => {
+    widget.hidden = !open;
+    toggle.hidden = open;
+    toggle.setAttribute("aria-expanded", String(open));
+    if (open) document.getElementById("psc-close").focus();
+    else toggle.focus();
+  };
+  toggle.addEventListener("click", () => setOpen(true));
+  document.getElementById("psc-close").addEventListener("click", () => setOpen(false));
+  document.getElementById("psc-symbol-input").addEventListener("input", (event) => {
+    event.target.dataset.edited = event.target.value.trim() ? "true" : "";
+    const symbol = event.target.value.trim().toUpperCase();
+    document.getElementById("psc-sym").textContent = symbol || "PAIR";
+    calculate();
+  });
+  const isTradingView = location.hostname === "tradingview.com" || location.hostname.endsWith(".tradingview.com");
+  document.getElementById("psc-status").textContent = isTradingView
+    ? "Open TradingView position tool to sync"
+    : "Exness: open Long/Short Position settings to attempt sync; enter symbol manually";
 
   // Bind Input Change Events
   document.getElementById("psc-balance").addEventListener("input", calculate);
@@ -175,6 +226,7 @@ function makeDraggable() {
   let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
 
   header.addEventListener("mousedown", (e) => {
+    if (e.target.closest("button")) return;
     e.preventDefault();
     startX = e.clientX;
     startY = e.clientY;
@@ -222,6 +274,15 @@ function calculate() {
 
   const rawSymbol = (document.getElementById("psc-sym").textContent || "FOREX").toUpperCase();
   const stopDistance = Math.abs(entry - sl);
+  // Exness index CFDs such as US500 have broker-specific contract specifications.
+  // Never treat them as ordinary forex pairs.
+  if (location.hostname.endsWith(".exness.com") || location.hostname === "exness.com") {
+    if (!/^(?:(?:EUR|GBP|AUD|NZD)USD|USDJPY|XAUUSD)$/.test(rawSymbol.replace(/[^A-Z]/g, ""))) {
+      document.getElementById("psc-lots").textContent = "NOT AVAILABLE";
+      document.getElementById("psc-pips-info").textContent = "Symbol needs broker-specific calculation";
+      return;
+    }
+  }
 
   // ----------------------------------------------------
   // A) FUTURES CONTRACT DICTIONARY (Point Values)
@@ -260,7 +321,7 @@ function calculate() {
     // FUTURES MATH: Contracts = RiskUSD / (Points * PointValue)
     // Futures contracts CANNOT be decimals. We round DOWN to protect account risk!
     const rawContracts = riskUSD / (stopDistance * pointValue);
-    const contracts = Math.max(1, Math.floor(rawContracts));
+    const contracts = Math.max(0, Math.floor(rawContracts));
 
     document.getElementById("psc-lots").textContent = `${contracts} CONTRACT${contracts > 1 ? 'S' : ''}`;
     document.getElementById("psc-pips-info").textContent = `${stopDistance.toFixed(2)} Pts Risk | ${matchedContract} ($${pointValue}/pt)`;
@@ -274,22 +335,84 @@ function calculate() {
       pipSize = 0.1;
     }
 
-    const pips = (stopDistance / pipSize).toFixed(1);
+    const pips = stopDistance / pipSize;
     let lotSize = 0;
 
     if (rawSymbol.includes("JPY")) {
-      lotSize = (riskUSD / (pips * 6.8)).toFixed(2);
+      lotSize = (riskUSD / (pips * 6.8));
     } else if (rawSymbol.includes("XAU") || rawSymbol.includes("GOLD")) {
-      lotSize = (riskUSD / (stopDistance * 100)).toFixed(2);
+      lotSize = (riskUSD / (stopDistance * 100));
     } else {
-      lotSize = (riskUSD / (pips * 10)).toFixed(2);
+      lotSize = (riskUSD / (pips * 10));
     }
 
-    if (lotSize < 0.01) lotSize = "0.01";
+    // Round down so the suggested size does not exceed the risk budget.
+    lotSize = (Math.floor(Number(lotSize) * 100) / 100).toFixed(2);
 
     document.getElementById("psc-lots").textContent = `${lotSize} LOTS`;
-    document.getElementById("psc-pips-info").textContent = `${pips} Pips Risk | Risk: $${riskUSD}`;
+    document.getElementById("psc-pips-info").textContent = `${pips.toFixed(1)} Pips Risk | Risk: $${riskUSD}`;
   }
+}
+
+// Read only explicitly labelled fields in a Long/Short Position settings dialog.
+// Profit and stop both have a "Price" field, so track the section heading.
+function syncExnessPosition() {
+  const candidates = new Set();
+  document.querySelectorAll("input").forEach(input => {
+    if (input.closest("#psc-widget")) return;
+    for (let node = input.parentElement; node && node !== document.body; node = node.parentElement) {
+      const text = (node.textContent || "").toLowerCase();
+      if (/\b(?:long|short) position\b/.test(text) && text.includes("account size") &&
+          text.includes("entry price") && text.includes("stop level") &&
+          node.querySelectorAll("input").length >= 4) {
+        candidates.add(node);
+        break;
+      }
+    }
+  });
+  // Do not guess when more than one dialog is present.
+  if (candidates.size !== 1) return;
+  const dialog = [...candidates][0];
+  if (!dialog.getClientRects().length) return;
+  const walker = document.createTreeWalker(dialog, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  let section = "", label = "";
+  const found = {};
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.nodeValue.trim().toLowerCase().replace(/\s+/g, " ");
+      if (text === "profit level" || text === "stop level") section = text;
+      else if (["account size", "risk", "entry price", "price", "ticks"].includes(text)) label = text;
+      continue;
+    }
+    if (node.tagName !== "INPUT") continue;
+    const value = Number(node.value.replace(/,/g, "").trim());
+    if (!node.value.trim() || !Number.isFinite(value) || value <= 0) { label = ""; continue; }
+    if (label === "account size") found.balance = value;
+    else if (label === "entry price") found.entry = value;
+    else if (label === "price" && section === "stop level") found.stop = value;
+    else if (label === "risk") {
+      // Only a percent risk can be copied into the percentage field.
+      let row = node.parentElement;
+      for (let i = 0; i < 3 && row && !row.querySelector("select, [role=combobox]"); i++) row = row.parentElement;
+      const selector = row && row.querySelector("select, [role=combobox]");
+      const unit = selector && (selector.tagName === "SELECT" ? selector.selectedOptions[0]?.textContent : selector.textContent);
+      if (unit && unit.trim() === "%") found.risk = value;
+    }
+    label = "";
+  }
+  if (!found.balance || !found.risk || !found.entry || !found.stop || found.entry === found.stop) return;
+  const fields = { "psc-balance": found.balance, "psc-risk-pct": found.risk, "psc-entry": found.entry, "psc-sl": found.stop };
+  let changed = false;
+  for (const [id, value] of Object.entries(fields)) {
+    const target = document.getElementById(id);
+    if (document.activeElement !== target && Number(target.value) !== value) {
+      target.value = value;
+      changed = true;
+    }
+  }
+  if (changed) calculate();
+  document.getElementById("psc-status").textContent = "Position settings synced; verify symbol and values";
 }
 
 // ========================================================
@@ -298,13 +421,22 @@ function calculate() {
 setInterval(() => {
   createWidget();
 
+  // Never apply TradingView's index-based fallback to Exness dialogs.
+  if (!(location.hostname === "tradingview.com" || location.hostname.endsWith(".tradingview.com"))) {
+    document.getElementById("psc-status").textContent = "Open Long/Short Position settings to attempt sync; enter symbol manually";
+    syncExnessPosition();
+    return;
+  }
+
   // Auto-Detect Symbol from Browser Tab Title
   const tabTitle = document.title;
   if (tabTitle && !tabTitle.startsWith("TradingView")) {
     const currentSym = tabTitle.split(" ")[0];
     const symBadge = document.getElementById("psc-sym");
-    if (symBadge && symBadge.textContent !== currentSym) {
+    const symbolInput = document.getElementById("psc-symbol-input");
+    if (symBadge && !symbolInput.dataset.edited && symBadge.textContent !== currentSym) {
       symBadge.textContent = currentSym;
+      symbolInput.value = currentSym;
       calculate();
     }
   }
