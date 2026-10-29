@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "PSC Pro v1 Test",
+  "version": "1.0.0",
+  "description": "Position Size Calculator for TradingView",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["https://*.tradingview.com/*"],
+  "action": {
+    "default_popup": "popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.tradingview.com/*"],
+      "js": ["utils/calculations.js", "content/content.js"]
+    }
+  ]
+}
